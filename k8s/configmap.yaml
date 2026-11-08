@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cloud-admin-web-config
+  namespace: cicd-lab
+data:
+  APP_ENV: classroom
+  COURSE_NAME: Intelligent Cloud Administration

@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloud-admin-web
+  namespace: cicd-lab
+spec:
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app: cloud-admin-web
+  template:
+    metadata:
+      labels:
+        app: cloud-admin-web
+    spec:
+      containers:
+        - name: web
+          image: cloud-admin-cicd-lab:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          envFrom:
+            - configMapRef:
+                name: cloud-admin-web-config
+            - secretRef:
+                name: cloud-admin-web-secret
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /health.html
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health.html
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
