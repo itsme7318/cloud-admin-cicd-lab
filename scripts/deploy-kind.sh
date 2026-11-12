@@ -8,7 +8,8 @@ for file in configmap secret service; do
   kubectl --context kind-cicd-lab apply -f "k8s/$file.yaml"
 done
 # Render desired immutable image before apply, avoiding a broken initial rollout.
-kubectl set image --local -f k8s/deployment.yaml "web=$image" -o yaml |
+kubectl patch --local -f k8s/deployment.yaml --type=strategic \
+  -p "{\"spec\":{\"template\":{\"spec\":{\"containers\":[{\"name\":\"web\",\"image\":\"$image\"}]}}}}" -o yaml |
   kubectl --context kind-cicd-lab apply -f -
 kubectl --context kind-cicd-lab apply -f k8s/hpa.yaml
 kubectl --context kind-cicd-lab -n cicd-lab rollout status deployment/cloud-admin-web --timeout=180s
