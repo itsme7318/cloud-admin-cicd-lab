@@ -1,0 +1,34 @@
+name: CD - Deploy to Kind Kubernetes
+on:
+  workflow_run:
+    workflows: ["CI - Build and Publish Container"]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  packages: read
+concurrency:
+  group: classroom-deployment
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - name: Load private registry image into Kind
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+          IMAGE: ghcr.io/itsme7318/cloud-admin-cicd-lab:${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          export DOCKER_CONFIG="$(mktemp -d)"
+          trap 'rm -rf "$DOCKER_CONFIG"' EXIT
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          docker pull "$IMAGE"
+          kind load docker-image "$IMAGE" --name cicd-lab
+          bash scripts/deploy-kind.sh "$IMAGE"
