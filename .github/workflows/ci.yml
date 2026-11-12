@@ -1,0 +1,78 @@
+name: CI - Build and Publish Container
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate-and-deploy-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate application and manifests
+        run: |
+          test -s app/index.html
+          test "$(cat app/health.html)" = OK
+          bash -n scripts/*.sh
+          docker build -t cloud-admin-cicd-lab:local .
+      - name: Container smoke test
+        run: |
+          docker run -d --name test-web -p 8081:80 cloud-admin-cicd-lab:local
+          trap 'docker rm -f test-web' EXIT
+          health="$(curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 2 http://127.0.0.1:8081/health.html)"
+          test "$health" = OK
+          curl --fail --silent --show-error http://127.0.0.1:8081/ | grep 'Cloud Retail'
+      - name: Create disposable Kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: cicd-lab
+          config: kind-config.yaml
+      - name: Deploy and validate Kubernetes
+        run: |
+          kind load docker-image cloud-admin-cicd-lab:local --name cicd-lab
+          bash scripts/deploy-kind.sh cloud-admin-cicd-lab:local
+          kubectl -n cicd-lab scale deployment/cloud-admin-web --replicas=4
+          kubectl -n cicd-lab rollout status deployment/cloud-admin-web --timeout=180s
+          test "$(kubectl -n cicd-lab get deployment cloud-admin-web -o jsonpath='{.status.readyReplicas}')" = 4
+          kubectl -n cicd-lab scale deployment/cloud-admin-web --replicas=2
+          kubectl -n cicd-lab rollout status deployment/cloud-admin-web --timeout=180s
+      - name: Capture cluster evidence
+        if: always()
+        run: |
+          mkdir -p evidence
+          kubectl get nodes -o wide > evidence/nodes.txt 2>&1 || true
+          kubectl -n cicd-lab get all -o wide > evidence/objects.txt 2>&1 || true
+          kubectl -n cicd-lab describe deployment cloud-admin-web > evidence/deployment.txt 2>&1 || true
+          kubectl -n cicd-lab get events --sort-by=.metadata.creationTimestamp > evidence/events.txt 2>&1 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cluster-evidence
+          path: evidence/
+  publish:
+    needs: validate-and-deploy-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/itsme7318/cloud-admin-cicd-lab:latest
+            ghcr.io/itsme7318/cloud-admin-cicd-lab:${{ github.sha }}
