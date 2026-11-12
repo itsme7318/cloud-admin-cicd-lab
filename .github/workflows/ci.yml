@@ -25,8 +25,9 @@ jobs:
         run: |
           docker run -d --name test-web -p 8081:80 cloud-admin-cicd-lab:local
           trap 'docker rm -f test-web' EXIT
-          curl --fail --retry 12 --retry-connrefused --retry-delay 2 http://localhost:8081/ | grep 'Cloud Retail'
-          test "$(curl --fail --silent http://localhost:8081/health.html)" = OK
+          health="$(curl --fail --silent --show-error --retry 12 --retry-all-errors --retry-delay 2 http://127.0.0.1:8081/health.html)"
+          test "$health" = OK
+          curl --fail --silent --show-error http://127.0.0.1:8081/ | grep 'Cloud Retail'
       - name: Create disposable Kind cluster
         uses: helm/kind-action@v1
         with:
